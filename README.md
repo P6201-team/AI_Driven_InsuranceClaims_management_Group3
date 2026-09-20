@@ -1,512 +1,194 @@
-# PE6201 A2 — AI-Driven Insurance Claims Management
+# PE6201 A2 — Insurance Claims Agent (Group 3)
 
-**Problem A: Health-insurance claim first response**  
-**Team:** Group 3  
-**Repository:** `P6201-team/AI_Driven_InsuranceClaims_management_Group3`
+This repository contains a tool-using insurance claims agent, two versions of its policy lookup interface, an evaluation harness, guardrail checks, and archived live-model results. The instructions below refer to the actual layout of this submission.
 
-This repository contains the team's single-agent ReAct system, tool layer, guardrails, evaluation data and harness, live-model results, D7 failure evidence, and D6 cost analysis for PE6201 A2.
+## 1. Start here
 
-The system produces one of three first-response outcomes for a claim:
+For marking, first run the **offline verification** in Section 3. It needs no API key, network connection, or third-party Python packages. Then inspect the archived live results in Section 5. Live API execution is optional and incurs provider charges.
 
-- `approve_in_principle`
-- `request_document`
-- `escalate`
+Verified on macOS with Python 3.9 on 20 September 2026, using an isolated copy of this submission. Use Python 3.9 or newer; other platforms were not independently tested.
 
-The reproducible evaluation entry point in the current repository is **`V2/run_eval.py`**. The `V2/` package supports both the frozen V1 and V2 interfaces through `--prompt-version v1` and `--prompt-version v2`.
+| Component | Location |
+|---|---|
+| Runnable V1 baseline | Repository root: `run_eval.py`, `agent.py`, `tools.py`, etc. |
+| Runnable V2 refinement | `V2/` |
+| Shared evaluation inputs | `Evaluation_Data/` |
+| Guardrail unit tests and checklist | `tests/` and `V2/tests/` |
+| Archived live-model runs and summaries | `evaluation result combination/` |
+| Consolidated workbook | `PE6201_A2_Evaluation_Results.xlsx` |
+| Contributions | `CONTRIBUTIONS.md` |
 
----
+**The `V1/` subfolder contains only an additional `analytics.py`; it is not the runnable baseline. Run V1 from the repository root.**
 
-## Quick start — reproduce the scripted run
+V2 refines `lookup_policy` (the function's actual name): the returned `member` object contains only `member_id` and `policy_id`, rather than the full V1 member row. The `policy` and `remaining` objects are retained. Its descriptor clarifies policy dates and remaining-limit interpretation. The main agent loop, other tools, and guardrails are shared in design. The default version label is also changed in V2's configuration.
 
-The scripted backend is deterministic, requires **no API key**, and makes **no network call**.
+**`--prompt-version` sets the version label; it does not swap tool implementations. To execute V2, change into `V2/`.**
 
-### Requirements
+## 2. Setup
 
-- Python **3.10+**
-- Git
-- No third-party Python package is required by the submitted runtime (`V2/requirements.txt` contains standard-library code only).
-
-### 1. Clone the repository
+Download and extract the repository, or clone it:
 
 ```bash
 git clone https://github.com/P6201-team/AI_Driven_InsuranceClaims_management_Group3.git
 cd AI_Driven_InsuranceClaims_management_Group3
 ```
 
-### 2. Validate the fixture data
+If using a ZIP, instead open a terminal in the extracted folder containing this README and the root `run_eval.py`.
+
+The following commands use macOS/Linux shell syntax. Start from a clean terminal without custom model, budget, autonomy, or version overrides. A local `.env` file may also change configuration; no `.env` or API key is needed for offline verification.
+
+```bash
+python3 --version
+export A2_DATA="$PWD/Evaluation_Data"
+export BACKEND=scripted
+mkdir -p results V2/results
+```
+
+Keep this terminal open for the remaining steps. `A2_DATA` must be an **absolute path to `Evaluation_Data`**, which contains both `data_A/` and `expected_outcomes_A.json`. The absolute path continues to work after changing into `V2/`.
+
+Windows PowerShell equivalent setup (use `python` in place of `python3` below):
+
+```powershell
+python --version
+$env:A2_DATA = (Resolve-Path .\Evaluation_Data).Path
+$env:BACKEND = "scripted"
+New-Item -ItemType Directory -Force results, V2/results | Out-Null
+```
+
+## 3. Offline verification — recommended marking route
+
+Run these commands from the repository root:
 
 ```bash
 python3 Evaluation_Data/check_my_data.py
-```
-
-A valid package ends with:
-
-```text
-Your data hangs together.
-```
-
-### 3. Enter the runnable evaluation package
-
-```bash
-cd V2
-```
-
-The evaluator needs to know where the shared Problem A fixture data lives.
-
-**macOS / Linux**
-
-```bash
-export A2_DATA="../Evaluation_Data"
-```
-
-**Windows PowerShell**
-
-```powershell
-$env:A2_DATA = "../Evaluation_Data"
-```
-
-### 4. Run the regression/unit tests
-
-```bash
 python3 -m unittest discover -s tests -v
+python3 run_eval.py --backend scripted --guardrails
+python3 run_eval.py --backend scripted --prompt-version v1 --output-dir results/offline_v1
 ```
 
-On Windows, if `python3` is not available, use:
-
-```powershell
-python -m unittest discover -s tests -v
-```
-
-### 5. Run the D3(b) guardrail checklist
-
-```bash
-python3 run_eval.py --guardrails
-```
-
-This exercises the executable guardrail checklist on the scripted backend and writes:
-
-```text
-V2/results/guardrail_results.json
-```
-
-The committed guardrail evidence used by the team is also available at:
-
-```text
-evaluation result combination/guardrails/GUARDRAIL_RESULTS.json
-```
-
-### 6. Run the full scripted V2 evaluation
-
-From inside `V2/`:
-
-```bash
-python3 run_eval.py --backend scripted --prompt-version v2
-```
-
-This uses the final evaluation data in `../Evaluation_Data/` and writes new local outputs under:
-
-```text
-V2/results/
-```
-
-including:
-
-```text
-v2_scripted_raw_results.json
-v2_scripted_raw_results.csv
-v2_scripted_summary.csv
-D6_SCRIPTED_HANDOFF.csv
-D6_SCRIPTED_HANDOFF.md
-```
-
-These scripted results validate the end-to-end evaluation plumbing. They are **not** the team's live-model performance measurements.
-
-### Optional: run one scripted case first
-
-For a faster sanity check:
-
-```bash
-python3 run_eval.py --backend scripted --prompt-version v2 --case CLM-8888
-```
-
----
-
-## Reproduce V1 using the same evaluator
-
-`V1/` is **not** a second standalone evaluator. In the current repository, the controlled V1/V2 behavior is selected from the complete `V2/` package.
-
-From inside `V2/` with `A2_DATA` already set:
-
-```bash
-python3 run_eval.py --backend scripted --prompt-version v1
-```
-
-This keeps the evaluation pipeline fixed while selecting the V1 tool-interface behavior.
-
----
-
-## Repository structure
-
-```text
-.
-├── Evaluation_Data/
-│   ├── README.md
-│   ├── check_my_data.py
-│   ├── make_fixtures_A.py
-│   ├── expected_outcomes_A.json
-│   ├── data_dictionary.json
-│   └── data_A/
-│
-├── V1/
-│   └── analytics.py
-│
-├── V2/                         # Complete runnable evaluation package
-│   ├── agent.py
-│   ├── tools.py
-│   ├── prompt.py
-│   ├── guardrails.py
-│   ├── backends.py
-│   ├── config.py
-│   ├── harness.py
-│   ├── result_io.py
-│   ├── analytics.py
-│   ├── run_eval.py
-│   ├── requirements.txt
-│   ├── README_EVAL.md
-│   ├── README_VERSION.md
-│   ├── tests/
-│   └── scripts/
-│
-├── evaluation result combination/
-│   ├── all_results.json
-│   ├── all_runs_detailed.csv
-│   ├── case_summary.csv
-│   ├── model_summary.csv
-│   ├── v1_v2_case_delta.csv
-│   ├── live_runs/
-│   │   ├── V1__GPT-4o_mini.json
-│   │   ├── V2__DeepSeek_V3.1.json
-│   │   ├── V2__GPT-4o_mini.json
-│   │   ├── V2__Gemini_2.5_Flash-Lite.json
-│   │   ├── V2__Mistral_Small_3.2_24B.json
-│   │   └── V2__Qwen3_235B.json
-│   ├── guardrails/
-│   │   └── GUARDRAIL_RESULTS.json
-│   └── d7/
-│       ├── D7_FAILURE1_LOOP_CONTROL.csv
-│       ├── D7_FAILURE1_LOOP_CONTROL.json
-│       └── D7_TWO_REPRODUCED_FAILURES.md
-│
-├── agent.py                    # Root-level integration/source copy
-├── backends.py
-├── config.py
-├── guardrails.py
-├── prompt.py
-├── result_io.py
-├── tools.py
-├── tests/                      # Root guardrail-test copy
-├── scripts/
-│   └── run_d7_failure1.py
-│
-├── model_summary.csv
-├── cost_model.csv
-├── PE6201_A2_Evaluation_Results.xlsx
-└── PE6201_A2_V1_V2_Evaluation_Data.zip
-```
-
-The root-level Python files are retained as project/integration artefacts. Because the root does not contain the complete `harness.py` + `run_eval.py` evaluator pair, the commands in this README intentionally use the complete **`V2/`** package.
-
----
-
-## Evaluation data
-
-`Evaluation_Data/` contains the final Problem A fixture set and ground truth.
-
-The current package contains:
-
-- **40 evaluation claims**
-- **15 instructor-supplied claims**
-- **25 team-added claims**
-- **10 non-approval / negative cases**
-
-Key files:
-
-| File | Purpose |
-|---|---|
-| `Evaluation_Data/make_fixtures_A.py` | Reproducible fixture generator |
-| `Evaluation_Data/data_A/` | Claim, member, policy, hospital, procedure and related fixture tables |
-| `Evaluation_Data/expected_outcomes_A.json` | Ground-truth outcomes used by the harness |
-| `Evaluation_Data/check_my_data.py` | Data integrity checker |
-| `Evaluation_Data/data_dictionary.json` | Field definitions and relationships |
-
-If fixture data is regenerated or changed, run:
-
-```bash
-python3 Evaluation_Data/make_fixtures_A.py
-python3 Evaluation_Data/check_my_data.py
-```
-
-Do not manually alter instructor-supplied records.
-
----
-
-## Guardrails — D3
-
-The active guardrail layer implements code-level controls for:
-
-- step cap
-- token-budget ceiling
-- action de-duplication
-- autonomy / irreversible-action gate
-
-The executable D3(b) checklist is under:
-
-```text
-V2/tests/
-```
-
-with the main artefacts:
-
-```text
-guardrail_cases.json
-guardrail_runner.py
-test_guardrails.py
-guardrail_case_mapping.md
-```
-
-Run it with:
+Then run V2:
 
 ```bash
 cd V2
-python3 run_eval.py --guardrails
-```
-
-The checklist includes hostile-request-text cases and records the wrong behaviour being tested, expected behavior, observed result, and pass/fail outcome.
-
----
-
-## V1 → V2 controlled comparison — D2(b)
-
-The controlled rewrite is implemented through the tool interface while keeping the same overall agent/evaluation framework.
-
-Use the same evaluator and switch only the prompt/interface version:
-
-```bash
-# V1
-python3 run_eval.py --backend scripted --prompt-version v1
-
-# V2
-python3 run_eval.py --backend scripted --prompt-version v2
-```
-
-The committed comparison evidence is available at:
-
-```text
-evaluation result combination/v1_v2_case_delta.csv
-PE6201_A2_V1_V2_Evaluation_Data.zip
-```
-
-The scripted backend is used for deterministic plumbing checks. Formal performance comparisons reported by the team come from the frozen live runs.
-
----
-
-## Live-model evaluation — D5
-
-Live runs use OpenRouter-compatible model IDs. An API key is required **only** for live mode.
-
-From inside `V2/`:
-
-**macOS / Linux**
-
-```bash
-export A2_DATA="../Evaluation_Data"
-export OPENROUTER_API_KEY="YOUR_KEY_HERE"
-
-python3 run_eval.py \
-  --backend live \
-  --model openai/gpt-4o-mini \
-  --prompt-version v2 \
-  --member-id YOUR_MEMBER_ID
-```
-
-**Windows PowerShell**
-
-```powershell
-$env:A2_DATA = "../Evaluation_Data"
-$env:OPENROUTER_API_KEY = "YOUR_KEY_HERE"
-
-python run_eval.py --backend live --model openai/gpt-4o-mini --prompt-version v2 --member-id YOUR_MEMBER_ID
-```
-
-Do **not** commit `.env` files or API keys.
-
-The evaluator uses a separate judge model for live grading. The evaluated model and judge model must be different.
-
-The submitted raw live evidence is preserved under:
-
-```text
-evaluation result combination/live_runs/
-```
-
-Current committed model/version runs are:
-
-| Version | Model |
-|---|---|
-| V1 | GPT-4o mini |
-| V2 | GPT-4o mini |
-| V2 | Gemini 2.5 Flash-Lite |
-| V2 | Mistral Small 3.2 24B |
-| V2 | DeepSeek V3.1 |
-| V2 | Qwen3 235B |
-
----
-
-## Consolidated evaluation evidence
-
-The main consolidated result files are:
-
-| File | Purpose |
-|---|---|
-| `evaluation result combination/all_results.json` | Combined raw evaluation result payload |
-| `evaluation result combination/all_runs_detailed.csv` | Per-run detailed measurements |
-| `evaluation result combination/case_summary.csv` | Case-level summary |
-| `evaluation result combination/model_summary.csv` | Model/version summary |
-| `evaluation result combination/v1_v2_case_delta.csv` | V1/V2 case-level comparison |
-| `model_summary.csv` | Top-level model summary used by analysis/cost work |
-| `PE6201_A2_Evaluation_Results.xlsx` | Final consolidated evaluation workbook |
-
-The repository currently preserves six model/version result sets with the raw run evidence retained separately.
-
----
-
-## D7 — reproduced failures
-
-The submitted D7 evidence is stored at:
-
-```text
-evaluation result combination/d7/
-```
-
-The report contains:
-
-1. **Loop-control failure:** working V2 minus action de-duplication, followed by restoration.
-2. **Tool-interface failure:** working V2 minus the `lookup_policy` interface refinement, followed by restoration.
-
-Primary evidence:
-
-```text
-D7_FAILURE1_LOOP_CONTROL.csv
-D7_FAILURE1_LOOP_CONTROL.json
-D7_TWO_REPRODUCED_FAILURES.md
-```
-
-The experiment source is retained at:
-
-```text
-V2/scripts/run_d7_failure1.py
-```
-
-The quick-start path above does not need to rerun D7; the required no-key reproducibility path for marking is the scripted evaluator and guardrail checklist.
-
----
-
-## D6 — cost model
-
-Top-level D6 artefacts include:
-
-```text
-cost_model.csv
-model_summary.csv
-V1/analytics.py
-V2/analytics.py
-PE6201_A2_Evaluation_Results.xlsx
-```
-
-The cost analysis is derived from measured model results and includes model-variable cost, expected fallback cost, monthly-volume calculations, sensitivity scenarios, and break-even fields.
-
-Scripted-backend cost files generated during the quick-start run are **plumbing checks only** and should not be interpreted as live production-cost measurements.
-
----
-
-## Output isolation and reproducibility
-
-Each evaluation trial creates a fresh agent run. Raw per-run evidence is retained rather than only reporting averages.
-
-For local experiments, generated outputs are written under `V2/results/`. The committed formal evidence remains under `evaluation result combination/` and the top-level result files.
-
-To avoid confusing a local rerun with the frozen submitted evidence:
-
-- do not overwrite files under `evaluation result combination/` unless intentionally regenerating the formal battery;
-- use `V2/results/` for local scripted checks;
-- keep API keys outside Git;
-- keep the same fixtures, answer key, harness, tool interface, and parameters when making controlled model comparisons.
-
----
-
-## Troubleshooting
-
-### `A2 data not found`
-
-Set `A2_DATA` before running the evaluator:
-
-```bash
-cd V2
-export A2_DATA="../Evaluation_Data"
-```
-
-PowerShell:
-
-```powershell
-cd V2
-$env:A2_DATA = "../Evaluation_Data"
-```
-
-### `Live backend requires OPENROUTER_API_KEY`
-
-You selected `--backend live`. Either provide your own key locally or switch back to:
-
-```bash
-python3 run_eval.py --backend scripted --prompt-version v2
-```
-
-### Judge model equals evaluated model
-
-The live evaluator forbids self-grading. Use a different `--judge-model` if the selected evaluated model matches the configured judge.
-
-### Data integrity failure
-
-Re-run:
-
-```bash
-python3 Evaluation_Data/check_my_data.py
-```
-
-and fix the fixture/link/label issue before trusting evaluation results.
-
----
-
-## Contribution record
-
-Team responsibilities and repository artefact mapping are documented separately in `CONTRIBUTIONS.md` for the final submission. GitHub upload history is supporting evidence only; collaborative integration, consolidation, and file movement may mean the uploader is not the sole author or owner of an artefact.
-
----
-
-## Reproducibility summary
-
-For the minimum no-key reproduction expected from a fresh clone:
-
-```bash
-git clone https://github.com/P6201-team/AI_Driven_InsuranceClaims_management_Group3.git
-cd AI_Driven_InsuranceClaims_management_Group3
-
-python3 Evaluation_Data/check_my_data.py
-
-cd V2
-export A2_DATA="../Evaluation_Data"
-
 python3 -m unittest discover -s tests -v
-python3 run_eval.py --guardrails
-python3 run_eval.py --backend scripted --prompt-version v2
+python3 run_eval.py --backend scripted --guardrails
+python3 run_eval.py --backend scripted --prompt-version v2 --output-dir results/offline_v2
+cd ..
 ```
 
-No API key or network access is required after the repository has been cloned.
+Observed results with the submitted files:
+
+| Check | V1 | V2 |
+|---|---:|---:|
+| Unit tests | 5/5 passed | 5/5 passed |
+| Guardrail checklist | 12/12 passed | 12/12 passed |
+| Scripted evaluation runs | 60/60 passed | 60/60 passed |
+
+The shared fixture integrity check also passed. The checklist includes four hostile-request-text cases. The unit tests that refer to a live backend use mocks and do not contact a provider.
+
+The evaluation battery contains 40 claims: 30 ordinary cases run once, and 10 negative cases run three times, giving 60 runs per version/model.
+
+**Interpretation:** scripted evaluation verifies local execution, result generation, and deterministic behavior. The scripted backend uses canned actions and, for many cases, expected answers; its scripted judge is not an independent live-model judge. Therefore, 60/60 is a smoke-test result, not evidence of 100% real-model accuracy. Scripted token/cost fields are estimates, not actual API charges.
+
+### Generated output
+
+- V1: `results/offline_v1/v1_scripted_raw_results.json` and `.csv`, plus summary and D6 handoff files.
+- V2: `V2/results/offline_v2/v2_scripted_raw_results.json` and `.csv`, plus summary and D6 handoff files.
+- Guardrails: `results/guardrail_results.json` and `V2/results/guardrail_results.json`.
+- Per-run decision logs are generated under the corresponding code directory.
+
+These output directories keep new verification results separate from the archived live experiments. Check per-run `overall_pass` and the summary; the evaluator's process exit code alone does not mean all evaluation cases passed.
+
+## 4. Reproduce the D7 loop-control demonstration
+
+The bundled `scripts/run_d7_failure1.py` CLI still assumes the original author's directory layout when locating archived JSON and a summary CSV. Running it directly in this repository can fail. The following verified command calls its existing experiment functions without those legacy report-generation paths and without changing source code.
+
+From the repository root, after Section 2 setup, run in a macOS/Linux shell:
+
+```bash
+cd V2
+python3 - <<'PYCODE'
+import json
+from pathlib import Path
+from scripts.run_d7_failure1 import experiment_runtime, run_condition
+
+with experiment_runtime():
+    results = {"before": run_condition(False), "after": run_condition(True)}
+
+output = Path("results/d7_local.json")
+output.parent.mkdir(parents=True, exist_ok=True)
+output.write_text(json.dumps(results, indent=2), encoding="utf-8")
+fields = ["stopped_by", "tool_actions_executed", "duplicate_actions_executed",
+          "total_tokens", "safety_test_pass"]
+print(json.dumps({k: {f: v[f] for f in fields} for k, v in results.items()}, indent=2))
+print("Saved:", output)
+PYCODE
+cd ..
+```
+
+On Windows, save the Python block between the `PYCODE` markers as `reproduce_d7.py` inside `V2/`, then run `python reproduce_d7.py` from `V2/` after the same environment setup.
+
+Expected observations:
+
+| Metric | Duplicate-action guard removed | Guard restored |
+|---|---:|---:|
+| Stop reason | `step_cap` | `duplicate_action` |
+| Executed tool actions | 8 | 1 |
+| Repeated actions | 7 | 0 |
+| Estimated total tokens | 65,880 | 6,240 |
+| Safety check | false | true |
+
+This is an intentional broken-versus-working comparison. The `false` result in the first condition is expected. It uses the existing agent and guard implementation with a deterministic repeated-action script; no live model is called. This command reproduces Failure 1 only. The archived D7 report also discusses the policy-interface comparison using the saved V1/V2 live experiments.
+
+## 5. Inspect the archived live results
+
+The following are historical results included with the submission, not outputs of the offline checks above:
+
+| Version / model | Strict passes | Rate |
+|---|---:|---:|
+| V1 / GPT-4o mini | 24/60 | 40.0% |
+| V2 / GPT-4o mini | 25/60 | 41.7% |
+| V2 / Gemini 2.5 Flash-Lite | 18/60 | 30.0% |
+| V2 / Mistral Small 3.2 24B | 26/60 | 43.3% |
+| V2 / DeepSeek V3.1 | 22/60 | 36.7% |
+| V2 / Qwen3 235B | 31/60 | 51.7% |
+
+Strict pass means the deterministic code check and the judge check both pass (`overall_pass`). The six archived files contain 360 runs in total. These counts were rechecked from the included JSON files.
+
+Evidence locations under `evaluation result combination/`:
+
+- `live_runs/`: six individual raw JSON files, including `V1__GPT-4o_mini.json` and `V2__GPT-4o_mini.json`.
+- `all_results.json` and `all_runs_detailed.csv`: combined run records.
+- `model_summary.csv`, `case_summary.csv`, and `v1_v2_case_delta.csv`: aggregate and case-level comparisons.
+- `guardrails/GUARDRAIL_RESULTS.json`: archived guardrail checklist.
+- `d7/`: archived loop-control output and `D7_TWO_REPRODUCED_FAILURES.md`.
+
+The same-model V1-to-V2 strict result improves by one run (24 to 25 of 60). This is a small observed difference in this battery, not proof of a general improvement across models. The cost model retains a `NOT_YET_PROVIDED` fixed-monthly-cost input; it should not be presented as a complete production cost estimate.
+
+## 6. Optional live execution
+
+Live execution requires internet access, an OpenRouter API key, and sufficient credits. Current provider model availability and prices may differ from the archived experiment. This submission check did not rerun live APIs.
+
+From the repository root, in the same shell with `A2_DATA` already set, supply your key locally as `OPENROUTER_API_KEY`. Do not place a real key in committed files. Then run a one-case V2 trial:
+
+```bash
+cd V2
+python3 run_eval.py --backend live --prompt-version v2 \
+  --model openai/gpt-4o-mini --model-family "OpenAI GPT-4o" \
+  --judge live --judge-model anthropic/claude-haiku-4.5 \
+  --case CLM-8888 --max-runs 1 --output-dir results/live_gpt4o_mini_trial
+cd ..
+```
+
+To run the full 60-run battery, remove `--case` and `--max-runs` and choose a new output directory. For V1, execute the root `run_eval.py` with `--prompt-version v1`. Use a distinct output directory for every version/model experiment because result filenames do not encode the model name. Agent and live judge both make provider calls. Use the archived results for grading when paid reruns are unnecessary.
+
+## 7. Troubleshooting and scope
+
+- **“A2 data not found”**: set `A2_DATA` to the absolute shared `Evaluation_Data` path; do not point it directly at `data_A`.
+- **Guardrail `FileNotFoundError`**: create `results` at the root and inside `V2` before running `--guardrails`. This option does not create its output parent directory and does not use `--output-dir`.
+- **Missing V1 entry point**: the baseline entry point is at the repository root, not inside `V1/`.
+- **Wrong V1/V2 behavior**: select the actual code directory; changing only `--prompt-version` does not change `lookup_policy`.
+- **D7 missing archived files**: use the function-based reproduction in Section 4 or inspect the supplied D7 outputs. The original CLI's report assembly is not portable to this layout.
+- **Unexpected offline results**: check inherited environment variables and local `.env` settings, particularly autonomy, turn/token limits, and version labels.
+
+The main offline evaluation and guardrail checks are reproducible with the setup above. The known D7 CLI path limitation remains in source; this README provides a tested way to reproduce its core experiment. Archived live results show substantial remaining claim-decision failures. A runnable submission should not be interpreted as a production-ready claims adjudication system or a guarantee that every assignment rubric item has been satisfied.
